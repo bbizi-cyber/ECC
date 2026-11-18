@@ -366,7 +366,7 @@ def pingpong(frames_a, frames_b, run=6, start='a'):
     return out
 
 
-# ---------------- #33 7.0-8.2 s: film to film through darkness (the user's favourite) ----------------
+# ---------------- #33 7.0-8.2 s: film to film through darkness (variant of the user favourite at 0.70-0.85 s) ----------------
 def dark_bridge(cur, nxt, k, n_out=6, n_in=5, floor=0.18, light=None):
     """Two films joined as one shot: the outgoing frame dims to ~18 % over n_out frames, the cut sits in
     the dark on the beat, then the incoming frame (same angle, same kind of light) rises from the dark
