@@ -364,3 +364,22 @@ def pingpong(frames_a, frames_b, run=6, start='a'):
         src = frames_a if cur == 'a' else frames_b
         out += src[i:i + run]; i += run; cur = 'b' if cur == 'a' else 'a'
     return out
+
+
+# ---------------- #33 7.0-8.2 s: film to film through darkness (the user's favourite) ----------------
+def dark_bridge(cur, nxt, k, n_out=6, n_in=5, floor=0.18, light=None):
+    """Two films joined as one shot: the outgoing frame dims to ~18 % over n_out frames, the cut sits in
+    the dark on the beat, then the incoming frame (same angle, same kind of light) rises from the dark
+    in n_in frames - faster around its own light source when `light` = (x, y) fraction is given.
+    k = 0..n_out+n_in-1; frames k < n_out come from cur, the rest from nxt."""
+    if k < n_out:
+        g = 1 - (1 - floor) * _ease((k + 1) / n_out)
+        return np.clip(cur.astype(np.float32) * g, 0, 255).astype(np.uint8)
+    t = _ease((k - n_out + 1) / n_in)
+    g = floor + (1 - floor) * t
+    x = nxt.astype(np.float32) * g
+    if light is not None and t < 1:                                       # the flame/lamp wakes first
+        H, W = nxt.shape[:2]; yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+        d = np.hypot(xx - light[0] * W, yy - light[1] * H) / (0.35 * W)
+        x = np.maximum(x, nxt.astype(np.float32) * np.clip(1.2 - d, 0, 1)[..., None] * min(1.0, 2 * t + 0.4))
+    return np.clip(x, 0, 255).astype(np.uint8)
