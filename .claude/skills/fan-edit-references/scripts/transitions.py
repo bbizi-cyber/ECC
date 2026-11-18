@@ -1,4 +1,4 @@
-"""Reusable edit transitions learned from the reference edits (fan-edit-references #14-16, #31-33).
+"""Reusable edit transitions learned from the reference edits (fan-edit-references #14-16, #31-34).
 
 All functions take/return HxWx3 uint8 RGB frames of the same size.
 - match_dissolve: "match cut" — the incoming shot is aligned onto the outgoing silhouette (ORB similarity),
@@ -213,3 +213,106 @@ def grain(img, n, sd=12.0):
     g = r.normal(0, sd, img.shape[:2]).astype(np.float32)
     g = cv2.GaussianBlur(g, (0, 0), 0.6)[..., None]
     return np.clip(img.astype(np.float32) + g, 0, 255).astype(np.uint8)
+
+
+# ---------------- learned from reference #34 (Fight Club, "the ideal"; measured frame by frame) ----------------
+def _hard_bw(img, lift=1.25, gamma=0.85):
+    """high-key, high-contrast black-and-white (peak frame of the #34 face morph: sat ~37, p99 = 255)"""
+    Y = np.clip(_luma(img) * lift, 0, 1) ** gamma
+    Y = np.clip((Y - 0.06) / 0.88, 0, 1)
+    return (np.repeat(Y[..., None], 3, 2) * 255).astype(np.uint8)
+
+
+def _scan_glitch(img, k, rows=3):
+    """a few thin horizontal colour-noise lines (the #34 morph tail)"""
+    r = np.random.default_rng(k * 31337)
+    H, W = img.shape[:2]; out = img.copy()
+    for _ in range(rows):
+        y = int(r.integers(0, H - 4)); h = int(r.integers(1, 4)); dx = int(r.integers(-W // 12, W // 12))
+        band = np.roll(out[y:y + h], dx, axis=1).astype(np.int16)
+        band[..., int(r.integers(0, 3))] += 60
+        out[y:y + h] = np.clip(band, 0, 255).astype(np.uint8)
+    return out
+
+
+def _face_matrix(box_cur, box_other, W, H):
+    """similarity transform putting the other face box onto the current one (normalized x0, y0, x1, y1)"""
+    (a0, b0, a1, b1), (c0, d0, c1, d1) = box_cur, box_other
+    s = ((a1 - a0) * W) / max(1e-6, (c1 - c0) * W)
+    cxa, cya = (a0 + a1) / 2 * W, (b0 + b1) / 2 * H; cxo, cyo = (c0 + c1) / 2 * W, (d0 + d1) / 2 * H
+    return np.float32([[s, 0, cxa - s * cxo], [0, s, cya - s * cyo]])
+
+
+def face_morph(cur, other, k, n=21, peak=6, faces=None):
+    """#34 "he is him": over ~0.7 s the other person's face, aligned onto the current face and turned into
+    hard high-key B&W, rises through the current shot (peak at frame `peak`), then sinks back with a few
+    glitch lines. Use in a quiet pause before the drop. k = 0..n-1.
+    faces = (box_cur, box_other) from extras.face_boxes() aligns two different people by their faces;
+    without it ORB alignment is tried (works for the same person in a similar pose)."""
+    H, W = cur.shape[:2]
+    M = _face_matrix(faces[0], faces[1], W, H) if faces else _align_matrix(cur, other)
+    o = other if M is None else cv2.warpAffine(other, M.astype(np.float32), (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    o = _hard_bw(o)
+    a = _ease((k + 1) / (peak + 1)) if k <= peak else 1 - _ease((k - peak) / (n - 1 - peak))
+    if faces:                                                             # soft oval around the face: no frame edges show
+        x0, y0, x1, y1 = faces[0]; fw = (x1 - x0) * W
+        yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+        d = np.hypot((xx - (x0 + x1) / 2 * W) / (fw * 0.85), (yy - (y0 + y1) / 2 * H) / (fw * 1.15))
+        a = a * np.clip((1.35 - d) / 0.5, 0, 1)[..., None]
+    x = np.clip(cur.astype(np.float32) * (1 - a) + o.astype(np.float32) * a, 0, 255).astype(np.uint8)
+    if peak < k < n - 3: x = _scan_glitch(x, k)
+    return x
+
+
+def echo_to_bw(frames, k, n=6, trail=3):
+    """#34: colour -> bright B&W through a ghost echo (the last `trail` frames blended) over n frames.
+    frames: the shot's frames so far (list), k: index of the current frame inside the transition."""
+    i = len(frames) - 1
+    acc = np.zeros_like(frames[i], np.float32); wsum = 0.0
+    for j in range(trail):
+        w = 0.55 ** j; acc += frames[max(0, i - j * 2)].astype(np.float32) * w; wsum += w
+    x = (acc / wsum).astype(np.uint8)
+    t = _ease((k + 1) / n)
+    return cv2.addWeighted(x, 1 - t, _hard_bw(x, lift=1.45, gamma=0.8), t, 0)
+
+
+def vanish_flicker(subject, plate, k, pattern=(7, 4, 3, 8)):
+    """#34: the same framing with and without the person, alternating in `pattern` frame runs
+    (subject, empty, subject, empty...). plate = clean plate of the same framing (a moment when he is
+    not in the shot, or an inpainted frame). Returns the frame for transition index k."""
+    edges = np.cumsum(pattern)
+    run = int(np.searchsorted(edges, k, side='right'))
+    return subject if run % 2 == 0 else plate
+
+
+def engrave_text(img, text, font_path, size_frac=0.11, cx=0.5, cy=0.5, alpha=0.55):
+    """#34: a word appears 'engraved' into the wall where the person was: serif caps, wide tracking,
+    slightly lighter than the wall with a soft dark lower edge"""
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    H, W = img.shape[:2]
+    f = ImageFont.truetype(font_path, int(H * size_frac))
+    txt = ' '.join(text.upper())                                          # wide tracking
+    base = Image.fromarray(img)
+    lay = Image.new('L', (W, H), 0); d = ImageDraw.Draw(lay)
+    bw, bh = d.textbbox((0, 0), txt, font=f)[2:]
+    x, y = int(cx * W - bw / 2), int(cy * H - bh / 2)
+    d.text((x, y), txt, fill=255, font=f)
+    sh = lay.filter(ImageFilter.GaussianBlur(1.6))
+    a = np.asarray(lay, np.float32)[..., None] / 255 * alpha
+    s = np.roll(np.asarray(sh, np.float32), 2, axis=0)[..., None] / 255 * alpha * 0.6
+    x0 = np.asarray(base, np.float32)
+    out = x0 * (1 - s * 0.6)                                              # shadow under the letters
+    out = out * (1 - a) + np.minimum(255, x0 * 1.35 + 18) * a             # lighter letter faces
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def stencil(img, mask=None, thr=None):
+    """#34 ending: two-level 'xerox' portrait (~79 % black, ~7 % white) on black; mask (0..1) keeps
+    only the person. thr defaults to the 72nd luma percentile of the person."""
+    g = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply((_luma(img) * 255).astype(np.uint8))
+    Y = cv2.GaussianBlur(g.astype(np.float32) / 255, (0, 0), 0.8)        # local contrast keeps hair/shirt detail
+    m = mask if mask is not None else np.ones_like(Y)
+    if thr is None: thr = float(np.percentile(Y[m > 0.5], 62)) if (m > 0.5).any() else 0.5
+    v = ((Y > thr) & (m > 0.5)).astype(np.float32)
+    v = cv2.GaussianBlur(v, (0, 0), 0.6)
+    return (np.repeat(v[..., None], 3, 2) * 255).astype(np.uint8)
