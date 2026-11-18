@@ -383,3 +383,10 @@ def dark_bridge(cur, nxt, k, n_out=6, n_in=5, floor=0.18, light=None):
         d = np.hypot(xx - light[0] * W, yy - light[1] * H) / (0.35 * W)
         x = np.maximum(x, nxt.astype(np.float32) * np.clip(1.2 - d, 0, 1)[..., None] * min(1.0, 2 * t + 0.4))
     return np.clip(x, 0, 255).astype(np.uint8)
+
+
+# ---------------- #36: full-screen stretch (male edits, sometimes, only for dark/intense material) ----------------
+def stretch_full(img, W=1080, H=1920):
+    """the whole 16:9 frame squeezed onto the vertical screen with no bars (aspect distortion ~x3.2):
+    tall, thin, uneasy. Use the active picture (letterbox removed) as input."""
+    return cv2.resize(img, (W, H), interpolation=cv2.INTER_AREA if img.shape[0] > H else cv2.INTER_CUBIC)
