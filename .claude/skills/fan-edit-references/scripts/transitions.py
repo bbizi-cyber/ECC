@@ -390,3 +390,31 @@ def stretch_full(img, W=1080, H=1920):
     """the whole 16:9 frame squeezed onto the vertical screen with no bars (aspect distortion ~x3.2):
     tall, thin, uneasy. Use the active picture (letterbox removed) as input."""
     return cv2.resize(img, (W, H), interpolation=cv2.INTER_AREA if img.shape[0] > H else cv2.INTER_CUBIC)
+
+
+# ---------------- #37: hand-drawn glowing scribbles that draw themselves on ----------------
+def light_scribble(img, strokes, k, n, width=None, colour=(255, 255, 255), glow=0.9):
+    """strokes: list of polylines [(x, y), ...] in 0..1 frame fractions; over n frames the line is drawn
+    point by point (k = 0..n-1, then it stays). A thick core plus a soft glow, like a marker of light."""
+    H, W = img.shape[:2]
+    width = width or max(3, W // 90)
+    tot = sum(len(s) - 1 for s in strokes); show = tot * min(1.0, (k + 1) / n)
+    layer = np.zeros((H, W), np.float32); done = 0.0
+    for s in strokes:
+        pts = np.array([(x * W, y * H) for x, y in s], np.float32)
+        for i in range(len(pts) - 1):
+            if done >= show: break
+            a, b = pts[i], pts[i + 1]; f = min(1.0, show - done)
+            b = a + (b - a) * f
+            cv2.line(layer, tuple(np.int32(a)), tuple(np.int32(b)), 1.0, width, cv2.LINE_AA); done += 1
+    halo = cv2.GaussianBlur(layer, (0, 0), width * 2.5) * glow
+    a = np.clip(layer + halo, 0, 1)[..., None]
+    return np.clip(img.astype(np.float32) * (1 - a) + np.array(colour, np.float32) * a, 0, 255).astype(np.uint8)
+
+
+def scribble_path(seed, n=40, cx=0.5, cy=0.35, size=0.25):
+    """a loose handwritten-looking loop path to feed light_scribble"""
+    r = np.random.default_rng(seed); t = np.linspace(0, 2 * np.pi * 1.6, n)
+    x = cx + size * (0.5 * np.cos(t) + 0.25 * np.cos(3 * t + r.random() * 6)) + r.normal(0, 0.006, n)
+    y = cy + size * 0.6 * (np.sin(t) + 0.3 * np.sin(2 * t + r.random() * 6)) + r.normal(0, 0.006, n)
+    return [list(zip(x, y))]
