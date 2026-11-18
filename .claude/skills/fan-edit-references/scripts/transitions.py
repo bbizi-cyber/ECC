@@ -316,3 +316,51 @@ def stencil(img, mask=None, thr=None):
     v = ((Y > thr) & (m > 0.5)).astype(np.float32)
     v = cv2.GaussianBlur(v, (0, 0), 0.6)
     return (np.repeat(v[..., None], 3, 2) * 255).astype(np.uint8)
+
+
+# ---------------- #34 core (the user's reason it is ideal): heroes in the SAME position ----------------
+_YN = {}
+
+
+def face_anchor(img, model_path):
+    """eye midpoint (x, y) and eye distance (fraction of width) of the biggest face, or None.
+    model_path: YuNet ONNX (face_detection_yunet). Eyes line up better than box centres."""
+    H, W = img.shape[:2]
+    if model_path not in _YN: _YN[model_path] = cv2.FaceDetectorYN.create(model_path, '', (W, H), 0.6, 0.3, 5000)
+    fd = _YN[model_path]; fd.setInputSize((W, H))
+    _, f = fd.detect(cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+    if f is None: return None
+    r = max(f, key=lambda q: q[2] * q[3])
+    (rx, ry), (lx, ly) = r[4:6], r[6:8]
+    return ((rx + lx) / 2 / W, (ry + ly) / 2 / H), float(np.hypot(lx - rx, ly - ry) / W)
+
+
+def face_lock(img, anchor, size=None, target=(0.47, 0.36), target_size=None, max_zoom=1.3):
+    """Reframe a shot so the face lands on the same screen point (and size) as in the shot before it.
+    #34 keeps the face within ~0.1 of the frame across 76 % of its cuts (dialogue part: x 0.43-0.50,
+    y 0.33-0.41), so the eye never has to jump - even when the cut goes to another person.
+    anchor/size: from face_anchor() (eye midpoint, eye distance); target/target_size: the previous
+    shot's anchor and size. Zooms in only (no borders), at most max_zoom: pick shots whose face is
+    already close and let the lock correct the last 10-15 %."""
+    H, W = img.shape[:2]
+    cx, cy = anchor
+    s = 1.0 if not (size and target_size) else float(np.clip(target_size / size, 1.0, max_zoom))
+    for _ in range(40):                                                   # grow the zoom until the target is reachable
+        dx, dy = target[0] - s * cx, target[1] - s * cy
+        if (1 - s <= dx <= 0 and 1 - s <= dy <= 0) or s >= max_zoom: break
+        s = min(max_zoom, s * 1.02)
+    dx = float(np.clip(target[0] - s * cx, 1 - s, 0)); dy = float(np.clip(target[1] - s * cy, 1 - s, 0))
+    M = np.float32([[s, 0, dx * W], [0, s, dy * H]])
+    return cv2.warpAffine(img, M, (W, H), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+
+
+def pingpong(frames_a, frames_b, run=6, start='a'):
+    """#34 signature run (21.1-21.9 s): two heroes in identical framing (same face point and size,
+    same dark background) alternate every `run` frames (6 = 0.2 s), both slowly pushing in.
+    frames_a/b: face-locked frame lists of equal framing; returns the interleaved list."""
+    out, i, cur = [], 0, start
+    n = min(len(frames_a), len(frames_b))
+    while i < n:
+        src = frames_a if cur == 'a' else frames_b
+        out += src[i:i + run]; i += run; cur = 'b' if cur == 'a' else 'a'
+    return out
