@@ -1,4 +1,4 @@
-"""Reusable edit transitions learned from the reference edits (fan-edit-references #14-16, #31-32).
+"""Reusable edit transitions learned from the reference edits (fan-edit-references #14-16, #31-33).
 
 All functions take/return HxWx3 uint8 RGB frames of the same size.
 - match_dissolve: "match cut" — the incoming shot is aligned onto the outgoing silhouette (ORB similarity),
@@ -167,3 +167,49 @@ def quick_blend(a, b, k, n=2):
 def creep_zoom(img, k, per_frame=0.009, cx=0.5, cy=0.5, max_scale=1.35):
     """#32: after the drop every shot keeps pushing in (~0.8-1 % per frame)"""
     return _affine(img, min(max_scale, (1 + per_frame) ** k), 0.0, cx, cy)
+
+
+# ---------------- learned from reference #33 (Fight Club, @raaah.qw, measured frame by frame) ----------------
+def _luma(img):
+    return (img.astype(np.float32) @ np.array([0.299, 0.587, 0.114], np.float32)) / 255.0
+
+
+def luma_burn(cur, nxt, k, n=3):
+    """#33 signature transition (3 frames): the brightest parts of the next shot burn through the dark
+    current shot first (luma key with a falling threshold), then both overlap, then the next shot lands
+    with a 1-frame vertical smear. k = 0..n-1; afterwards play nxt as is."""
+    if k >= n - 1:                                                        # last frame: vertical smear
+        return _blur_dir(nxt, max(9, nxt.shape[0] // 22), angle=90)
+    thr = 0.62 - 0.5 * (k / max(1, n - 2))                                # 0.62 -> 0.12
+    Y = _luma(nxt)
+    m = np.clip((Y - thr) / 0.12, 0, 1)
+    m = cv2.GaussianBlur(m, (0, 0), 1.0)[..., None]
+    out = cur.astype(np.float32) * (1 - m) + nxt.astype(np.float32) * m
+    if k > 0:                                                             # second frame: a ghost of both
+        out = 0.55 * out + 0.45 * np.maximum(cur, nxt).astype(np.float32)
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def flash_in(cur, nxt, k):
+    """#33 drop flash (3 frames): current shot over-exposes, a lilac-white frame, then the next shot
+    arrives washed out in warm white and is normal on the following frame."""
+    if k == 0:                                                            # ramp: x1.4 plus a white lift
+        x = cur.astype(np.float32) * 1.4 + 40
+    elif k == 1:
+        return np.full_like(cur, (251, 242, 251))
+    else:                                                                 # warm wash-out of the next shot
+        x = (255 - (255 - nxt.astype(np.float32)) * 0.18) * np.array([1.0, 0.86, 0.79], np.float32)
+    return np.clip(x, 0, 255).astype(np.uint8)
+
+
+def vsmear(img, strength=1.0):
+    """#33: one vertically smeared frame on a cut (a vertical whip of 1 frame)"""
+    return _blur_dir(img, max(5, int(img.shape[0] / 22 * strength)), angle=90)
+
+
+def grain(img, n, sd=12.0):
+    """#33 look: heavy film grain (residual sd ~12 on 8-bit), deterministic per frame index"""
+    r = np.random.default_rng(n * 7919)
+    g = r.normal(0, sd, img.shape[:2]).astype(np.float32)
+    g = cv2.GaussianBlur(g, (0, 0), 0.6)[..., None]
+    return np.clip(img.astype(np.float32) + g, 0, 255).astype(np.uint8)
