@@ -150,3 +150,8 @@
 - 21.11.2026 — прислал уроки CapCut «давай тебя научим»: https://www.youtube.com/watch?v=wwMeX-qDfoA (Tifofey), https://www.youtube.com/watch?v=tjmbz1k9wsU (YoEdit), «еще можешь вот посмотреть» https://www.youtube.com/watch?v=fQhLtx4K3Ok
 - 21.11.2026 — «может быть тебя это научит тоже» https://www.youtube.com/watch?v=l6FyY7C45vM
 - 21.11.2026 — «ну ты этому навсегда обучайся, запоминай что говорят» (про уроки монтажа: всё, что в них говорят, — в навык навсегда).
+- 21.11.2026 — «еще» https://www.youtube.com/watch?v=uvwlewmw274
+- 21.11.2026 — «и еще» https://www.youtube.com/watch?v=NQJgTkFQQys
+- 21.11.2026, про СДВГ v4 (velocity, вступление с репликой, засветы, искры): «ужасно вышло».
+- 21.11.2026 — «вот еще есть долгий, пожалуйста» https://www.youtube.com/watch?v=fcuMbak3sWU ; выбрал CapCut («давай кап кут», «скинь офиц ссылку»)
+- 21.11.2026 — «короче забудь все версии твоих эдитов с джиленхолом».
